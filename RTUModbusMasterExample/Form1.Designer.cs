@@ -43,7 +43,7 @@
             this.btnReadCoils = new System.Windows.Forms.Button();
             this.btnReadDiscreateInputs = new System.Windows.Forms.Button();
             this.btnReadHoldingRegisters = new System.Windows.Forms.Button();
-            this.button4 = new System.Windows.Forms.Button();
+            this.btnReadInputRegisters = new System.Windows.Forms.Button();
             this.btnWriteSingleCoil = new System.Windows.Forms.Button();
             this.btnWriteSingleRegister = new System.Windows.Forms.Button();
             this.btnWriteMultipleCoils = new System.Windows.Forms.Button();
@@ -88,7 +88,7 @@
             this.btnDisconnect.TabIndex = 1;
             this.btnDisconnect.Text = "Disconnect";
             this.btnDisconnect.UseVisualStyleBackColor = false;
-            this.btnDisconnect.Click += new System.EventHandler(this.btnDisconnect_Click);
+            this.btnDisconnect.Click += new System.EventHandler(this.btnDisconnect_Click_1);
             // 
             // label1
             // 
@@ -219,15 +219,17 @@
             this.btnReadHoldingRegisters.TabIndex = 14;
             this.btnReadHoldingRegisters.Text = "Read Holding Registers-FC3";
             this.btnReadHoldingRegisters.UseVisualStyleBackColor = true;
+            this.btnReadHoldingRegisters.Click += new System.EventHandler(this.btnReadHoldingRegisters_Click);
             // 
-            // button4
+            // btnReadInputRegisters
             // 
-            this.button4.Location = new System.Drawing.Point(-2, 171);
-            this.button4.Name = "button4";
-            this.button4.Size = new System.Drawing.Size(167, 23);
-            this.button4.TabIndex = 15;
-            this.button4.Text = "Read Input Registers-FC4";
-            this.button4.UseVisualStyleBackColor = true;
+            this.btnReadInputRegisters.Location = new System.Drawing.Point(-2, 171);
+            this.btnReadInputRegisters.Name = "btnReadInputRegisters";
+            this.btnReadInputRegisters.Size = new System.Drawing.Size(167, 23);
+            this.btnReadInputRegisters.TabIndex = 15;
+            this.btnReadInputRegisters.Text = "Read Input Registers-FC4";
+            this.btnReadInputRegisters.UseVisualStyleBackColor = true;
+            this.btnReadInputRegisters.Click += new System.EventHandler(this.btnReadInputRegisters_Click);
             // 
             // btnWriteSingleCoil
             // 
@@ -247,6 +249,7 @@
             this.btnWriteSingleRegister.TabIndex = 17;
             this.btnWriteSingleRegister.Text = "Write Single Register-FC6";
             this.btnWriteSingleRegister.UseVisualStyleBackColor = true;
+            this.btnWriteSingleRegister.Click += new System.EventHandler(this.btnWriteSingleRegister_Click);
             // 
             // btnWriteMultipleCoils
             // 
@@ -256,6 +259,7 @@
             this.btnWriteMultipleCoils.TabIndex = 18;
             this.btnWriteMultipleCoils.Text = "Write Multiple Coils-FC15";
             this.btnWriteMultipleCoils.UseVisualStyleBackColor = true;
+            this.btnWriteMultipleCoils.Click += new System.EventHandler(this.btnWriteMultipleCoils_Click);
             // 
             // btnWriteMultipleRegisters
             // 
@@ -265,6 +269,7 @@
             this.btnWriteMultipleRegisters.TabIndex = 19;
             this.btnWriteMultipleRegisters.Text = "Write Multiple Registers-FC16";
             this.btnWriteMultipleRegisters.UseVisualStyleBackColor = true;
+            this.btnWriteMultipleRegisters.Click += new System.EventHandler(this.btnWriteMultipleRegisters_Click);
             // 
             // lstReadDataFromServer
             // 
@@ -374,6 +379,7 @@
             this.btnClearEntry.TabIndex = 32;
             this.btnClearEntry.Text = "Clear Entry";
             this.btnClearEntry.UseVisualStyleBackColor = true;
+            this.btnClearEntry.Click += new System.EventHandler(this.btnClearEntry_Click);
             // 
             // btnClearAll
             // 
@@ -383,6 +389,7 @@
             this.btnClearAll.TabIndex = 33;
             this.btnClearAll.Text = "Clear All";
             this.btnClearAll.UseVisualStyleBackColor = true;
+            this.btnClearAll.Click += new System.EventHandler(this.btnClearAll_Click);
             // 
             // btnPrepareCoils
             // 
@@ -392,6 +399,7 @@
             this.btnPrepareCoils.TabIndex = 34;
             this.btnPrepareCoils.Text = "Prepare Coils";
             this.btnPrepareCoils.UseVisualStyleBackColor = true;
+            this.btnPrepareCoils.Click += new System.EventHandler(this.btnPrepareCoils_Click);
             // 
             // btnPrepareRegisters
             // 
@@ -401,6 +409,7 @@
             this.btnPrepareRegisters.TabIndex = 35;
             this.btnPrepareRegisters.Text = "Prepare Registers";
             this.btnPrepareRegisters.UseVisualStyleBackColor = true;
+            this.btnPrepareRegisters.Click += new System.EventHandler(this.btnPrepareRegisters_Click);
             // 
             // txtPrepareCoils
             // 
@@ -444,7 +453,7 @@
             this.Controls.Add(this.btnWriteMultipleCoils);
             this.Controls.Add(this.btnWriteSingleRegister);
             this.Controls.Add(this.btnWriteSingleCoil);
-            this.Controls.Add(this.button4);
+            this.Controls.Add(this.btnReadInputRegisters);
             this.Controls.Add(this.btnReadHoldingRegisters);
             this.Controls.Add(this.btnReadDiscreateInputs);
             this.Controls.Add(this.btnReadCoils);
@@ -485,7 +494,7 @@
         private System.Windows.Forms.Button btnReadCoils;
         private System.Windows.Forms.Button btnReadDiscreateInputs;
         private System.Windows.Forms.Button btnReadHoldingRegisters;
-        private System.Windows.Forms.Button button4;
+        private System.Windows.Forms.Button btnReadInputRegisters;
         private System.Windows.Forms.Button btnWriteSingleCoil;
         private System.Windows.Forms.Button btnWriteSingleRegister;
         private System.Windows.Forms.Button btnWriteMultipleCoils;
