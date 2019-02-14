@@ -209,6 +209,7 @@
             this.btnReadDiscreateInputs.TabIndex = 13;
             this.btnReadDiscreateInputs.Text = "Read Discreate Inputs-FC2";
             this.btnReadDiscreateInputs.UseVisualStyleBackColor = true;
+            this.btnReadDiscreateInputs.Click += new System.EventHandler(this.btnReadDiscreateInputs_Click);
             // 
             // btnReadHoldingRegisters
             // 
@@ -236,6 +237,7 @@
             this.btnWriteSingleCoil.TabIndex = 16;
             this.btnWriteSingleCoil.Text = "Write Single Coil-FC5";
             this.btnWriteSingleCoil.UseVisualStyleBackColor = true;
+            this.btnWriteSingleCoil.Click += new System.EventHandler(this.btnWriteSingleCoil_Click);
             // 
             // btnWriteSingleRegister
             // 
