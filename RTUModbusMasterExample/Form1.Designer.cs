@@ -66,6 +66,7 @@
             this.btnPrepareRegisters = new System.Windows.Forms.Button();
             this.txtPrepareCoils = new System.Windows.Forms.TextBox();
             this.txtPrepareRegisters = new System.Windows.Forms.TextBox();
+            this.richTextBox2 = new System.Windows.Forms.RichTextBox();
             this.SuspendLayout();
             // 
             // btnConnect
@@ -278,6 +279,7 @@
             this.lstReadDataFromServer.Name = "lstReadDataFromServer";
             this.lstReadDataFromServer.Size = new System.Drawing.Size(222, 121);
             this.lstReadDataFromServer.TabIndex = 20;
+            this.lstReadDataFromServer.SelectedIndexChanged += new System.EventHandler(this.lstReadDataFromServer_SelectedIndexChanged);
             // 
             // lstWriteDataToServer
             // 
@@ -425,12 +427,21 @@
             this.txtPrepareRegisters.Size = new System.Drawing.Size(100, 20);
             this.txtPrepareRegisters.TabIndex = 37;
             // 
+            // richTextBox2
+            // 
+            this.richTextBox2.Location = new System.Drawing.Point(634, 76);
+            this.richTextBox2.Name = "richTextBox2";
+            this.richTextBox2.Size = new System.Drawing.Size(198, 96);
+            this.richTextBox2.TabIndex = 38;
+            this.richTextBox2.Text = "";
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.SystemColors.Control;
             this.ClientSize = new System.Drawing.Size(919, 517);
+            this.Controls.Add(this.richTextBox2);
             this.Controls.Add(this.txtPrepareRegisters);
             this.Controls.Add(this.txtPrepareCoils);
             this.Controls.Add(this.btnPrepareRegisters);
@@ -517,6 +528,7 @@
         private System.Windows.Forms.Button btnPrepareRegisters;
         private System.Windows.Forms.TextBox txtPrepareCoils;
         private System.Windows.Forms.TextBox txtPrepareRegisters;
+        private System.Windows.Forms.RichTextBox richTextBox2;
     }
 }
 
