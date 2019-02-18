@@ -13,6 +13,9 @@ using System.IO;
 
 namespace RTUModbusMasterExample
 {
+
+
+
     public partial class Form1 : Form
     {
         SerialPort serialPort;
@@ -20,19 +23,22 @@ namespace RTUModbusMasterExample
         int baudRate;
         Parity parity;
         StopBits stopBits;
-       
+       byte[] readData=new byte[8];
         bool connected = false;
-     
+        public event EventHandler<SerialDataEventArgs> NewSerialDataRecieved;
 
-       private byte [] transactionIdentifier = new byte[2];
-		private byte [] protocolIdentifier = new byte[2];
+        private uint transctionIdentifierInternal = 0;
+        private byte[] transctionIdentifier = new byte[2];
+        private byte[] protocolIdentifier = new byte[2];
+    
+     
+	
         private byte[] crc = new byte[2];
 		private byte [] length = new byte[2];
 		private byte unitIdentifier = 0x01;
 		private byte functionCode;
         private byte[] startingAddress = new byte[2];
-        private uint transactionIdentifierInternal = 0;
-
+ 
         private byte[] quantity = new byte[2];
         private byte SlaveId = 0x01;
         
@@ -137,50 +143,13 @@ namespace RTUModbusMasterExample
             }
             return (UInt16)((UInt16)uchCRCHi << 8 | uchCRCLo);   
         }
-       public void ReadCoils(int startAddress, int quantity)
-          {
- 
-       
 
-              this.startingAddress = BitConverter.GetBytes(startAddress);
-              this.quantity = BitConverter.GetBytes(quantity);
-    
-              this.functionCode = 0x01;
-              this.startingAddress = BitConverter.GetBytes(startAddress);
-              this.quantity = BitConverter.GetBytes(quantity);
-
-
-
-              byte[] data = new byte[] 
-                { 
-              this.unitIdentifier,
-
-                this.functionCode,
-                this.startingAddress[1],
-                this.startingAddress[0],
-                 this.quantity[1],
-
-                this.quantity[0],
-                 this.crc[0],
-                this.crc[1]
-           
-                 };
          
 
-              crc = BitConverter.GetBytes(calculateCRC(data, 0, 6));
-              data[6] = this.crc[0];
-              data[7] = this.crc[1];
-              serialPort.Write(data, 0, 8);
-              
-              
-                
-        
-            
-          }
         public bool[] ReadDiscreateInputs(int startAddress, int quantity)
           {
               bool[] response;
-              this.transactionIdentifier = BitConverter.GetBytes((uint)transactionIdentifierInternal);
+              this.transctionIdentifier = BitConverter.GetBytes(transctionIdentifierInternal);
               this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
               this.length = BitConverter.GetBytes((int)0x0006);
               this.functionCode = 0x02;
@@ -188,12 +157,13 @@ namespace RTUModbusMasterExample
               this.quantity = BitConverter.GetBytes(quantity);
               Byte[] data = new byte[]
                             {	
-                            this.transactionIdentifier[1],
-							this.transactionIdentifier[0],
-							this.protocolIdentifier[1],
-							this.protocolIdentifier[0],
-							this.length[1],
-							this.length[0],
+                                 this.transctionIdentifier[1],
+                  this. transctionIdentifier[0],
+                  this.protocolIdentifier[1],
+                  this. protocolIdentifier[0],
+                   this. length[1],
+                   this.length[0],
+                          
 							this.unitIdentifier,
 							this.functionCode,
 							this.startingAddress[1],
@@ -204,24 +174,27 @@ namespace RTUModbusMasterExample
                             this.crc[1]
                             };
               crc = BitConverter.GetBytes(calculateCRC(data, 6, 6));
+
               data[12] = crc[0];
               data[13] = crc[1];
-            try
-                {
-                    data = new Byte[2100];
-                    int NumberOfBytes = serialPort.Read(data, 0, data.Length);
-                }
-            catch(Exception E)
-                {
-                    MessageBox.Show(""+E.Message);
-            }
-                response = new bool[quantity];
-                for (int i = 0; i < quantity; i++)
-                {
-                    int intData = data[9 + i / 8];
-                    int mask = Convert.ToInt32(Math.Pow(2, (i % 8)));
-                    response[i] = Convert.ToBoolean((intData & mask) / mask);
-                }
+              serialPort.Write(data,6,8);
+
+            //  int bytes = serialPort.BytesToRead;
+           data = new byte[2100];
+              serialPort.Read(data, 0, data.Length);
+              response = new bool[quantity];
+              for (int i = 0; i < quantity; i++)
+              {
+                  int intData = data[3+i/8];
+                 int mask = Convert.ToInt32(Math.Pow(2, (i % 8)));
+                  response[i] = Convert.ToBoolean(intData & mask);
+              }    	
+        
+          
+            
+             
+           
+                
                 return (response);
                 
             }
@@ -230,7 +203,7 @@ namespace RTUModbusMasterExample
         public int[] ReadHoldingRegisters(int startAddress, int quantity)
         {
             int[] response;
-            this.functionCode = 0x02;
+            this.functionCode = 0x03;
             this.startingAddress = BitConverter.GetBytes(startAddress);
             this.quantity = BitConverter.GetBytes(quantity);
             this.SlaveId = 0x01;
@@ -350,7 +323,7 @@ namespace RTUModbusMasterExample
                 try
                 {
                     byte[] coilValue = new byte[2];
-                    this.transactionIdentifier = BitConverter.GetBytes((uint)transactionIdentifierInternal);
+                    this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
                     this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
                     this.length = BitConverter.GetBytes((int)0x0006);
                     this.functionCode = 0x05;
@@ -527,7 +500,7 @@ namespace RTUModbusMasterExample
                     }
                     byte byteCount = (byte)(values.Length * 2);
                     byte[] quantityOfOutputs = BitConverter.GetBytes((int)values.Length);
-                    this.transactionIdentifier = BitConverter.GetBytes((uint)transactionIdentifierInternal);
+                    this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
                     this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
 
                     this.functionCode = 0x10;
@@ -565,7 +538,7 @@ namespace RTUModbusMasterExample
     
         private void btnReadDiscreateInputs_Click(object sender, EventArgs e)
         {
-           
+            lstReadDataFromServer.Items.Clear();
         
             try
             {
@@ -591,7 +564,17 @@ namespace RTUModbusMasterExample
                 serialPort.Close();
             }
         }
+        void serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            int dataLength = serialPort.BytesToRead;
+            byte[] data = new byte[dataLength];
+            int nbrDataRead = serialPort.Read(data, 0, dataLength);
+            if (nbrDataRead == 0)
+                return;
 
+            if (NewSerialDataRecieved != null)
+                NewSerialDataRecieved(this, new SerialDataEventArgs(data));
+        }
         private void btnConnect_Click(object sender, EventArgs e)
         {
             try
@@ -626,9 +609,7 @@ namespace RTUModbusMasterExample
                         stopBits = StopBits.Two;
                     }
                     serialPort = new SerialPort(portName, baudRate, parity, 8, stopBits);
-                    //serialPort.Handshake = Handshake.None;
-                   // serialPort.ReadTimeout = 2000;
-                   // serialPort.WriteTimeout = 2000;
+                    serialPort.DataReceived += new SerialDataReceivedEventHandler(serialPort_DataReceived);
 
                     serialPort.Open();
                     connected = true;
@@ -701,8 +682,12 @@ namespace RTUModbusMasterExample
 
           try
           {
-              ReadCoils(Int32.Parse(txtStartAddress.Text) - 1, Int32.Parse(txtSize.Text));
+            //  bool[] response=ReadCoils(Int32.Parse(txtStartAddress.Text) - 1, Int32.Parse(txtSize.Text));
 
+             // for (int i = 0; i < response.Length; i++)
+            //  {
+                //  lstReadDataFromServer.Items.Add(response[i]);
+             // }
           }
           catch(Exception ee)
           {
@@ -910,4 +895,14 @@ namespace RTUModbusMasterExample
     
          
     }
+    public class SerialDataEventArgs : EventArgs
+    {
+        public byte[] Data;
+        public SerialDataEventArgs(byte[] dataInByteArray)
+        {
+            Data = dataInByteArray;
+        }
+
+    }
+
 }
