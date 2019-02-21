@@ -8,6 +8,7 @@ using System.Text;
 using System.Windows.Forms;
 using System.IO.Ports;
 using System.IO;
+using System.Threading;
 
 
 
@@ -23,9 +24,21 @@ namespace RTUModbusMasterExample
         int baudRate;
         Parity parity;
         StopBits stopBits;
+        public enum RegisterOrder { LowHigh = 0, HighLow = 1 };
+        private bool debug=false;
        byte[] readData=new byte[8];
         bool connected = false;
-        public event EventHandler<SerialDataEventArgs> NewSerialDataRecieved;
+        public delegate void ReceiveDataChangedHandler(object sender);
+        public event ReceiveDataChangedHandler ReceiveDataChanged;
+        public delegate void SendDataChangedHandler(object sender);
+        public event SendDataChangedHandler SendDataChanged;
+        public delegate void ConnectedChangedHandler(object sender);
+        public event ConnectedChangedHandler ConnectedChanged;
+         public int NumberOfRetries { get; set; } 
+        private int countRetries = 0;
+          private int connectTimeout = 1000;
+        public byte[] receiveData;
+        public byte[] sendData;
 
         private uint transctionIdentifierInternal = 0;
         private byte[] transctionIdentifier = new byte[2];
@@ -35,12 +48,17 @@ namespace RTUModbusMasterExample
 	
         private byte[] crc = new byte[2];
 		private byte [] length = new byte[2];
-		private byte unitIdentifier = 0x01;
+        private byte unitIdentifier = 0x01;
 		private byte functionCode;
         private byte[] startingAddress = new byte[2];
  
         private byte[] quantity = new byte[2];
         private byte SlaveId = 0x01;
+          private bool dataReceived = false;
+        private bool receiveActive = false;
+        private byte[] readBuffer = new byte[256];
+        private int bytesToRead = 0;
+        private int akjjjctualPositionToRead = 0;
         
 
         public Form1()
@@ -52,10 +70,32 @@ namespace RTUModbusMasterExample
         {
 
         }
+        private void Form1_Closing(object sender, EventArgs e)
+        {
+            disConnect();
 
+        }
+        String data;
+        private void serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            data = serialPort.ReadExisting();
+            this.Invoke(new EventHandler(displayText));
+        }
+
+        private void displayText(object o, EventArgs e)
+        {
+            richTextBox2.AppendText(data);
+        }
+        
         private void Form1_Load(object sender, EventArgs e)
         {
-          
+            cmbComPort.SelectedIndex = 0;
+            txtSlaveId.Text = "1";
+            txtBraudRate.Text = "9600";
+            cmbParity.SelectedIndex = 0;
+            cmbStopBits.SelectedIndex = 0;
+
+            
             btnClearAll.Enabled = false;
             btnClearEntry.Enabled = false;
             btnDisconnect.Enabled = false;
@@ -82,7 +122,7 @@ namespace RTUModbusMasterExample
         }
 
        
-          public static UInt16 calculateCRC(byte[] data, UInt16 numberOfBytes, int startByte)
+        public static UInt16 calculateCRC(byte[] data, UInt16 numberOfBytes, int startByte)
         { 
             byte[] auchCRCHi = {
             0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81,
@@ -144,26 +184,42 @@ namespace RTUModbusMasterExample
             return (UInt16)((UInt16)uchCRCHi << 8 | uchCRCLo);   
         }
 
-         
 
-        public bool[] ReadDiscreateInputs(int startAddress, int quantity)
-          {
-              bool[] response;
-              this.transctionIdentifier = BitConverter.GetBytes(transctionIdentifierInternal);
-              this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
-              this.length = BitConverter.GetBytes((int)0x0006);
-              this.functionCode = 0x02;
-              this.startingAddress = BitConverter.GetBytes(startAddress);
-              this.quantity = BitConverter.GetBytes(quantity);
-              Byte[] data = new byte[]
-                            {	
-                                 this.transctionIdentifier[1],
-                  this. transctionIdentifier[0],
-                  this.protocolIdentifier[1],
-                  this. protocolIdentifier[0],
-                   this. length[1],
-                   this.length[0],
-                          
+
+        public bool[] ReadCoils(int startingAddress, int quantity)
+        {
+       
+            transctionIdentifierInternal++;
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+                 
+                   MessageBox.Show("serial port not opened");
+                }
+            if ( serialPort == null)
+            {
+               
+              MessageBox.Show("connection error");
+            }
+            if (startingAddress > 65535 | quantity > 2000)
+            {
+               
+               MessageBox.Show("Starting address must be 0 - 65535; quantity must be 0 - 2000");
+            }
+            bool[] response;
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)0x0006);
+            this.functionCode = 0x01;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+            this.quantity = BitConverter.GetBytes(quantity);
+            Byte[] data = new byte[]{	
+                            this.transctionIdentifier[1],
+							this.transctionIdentifier[0],
+							this.protocolIdentifier[1],
+							this.protocolIdentifier[0],
+							this.length[1],
+							this.length[0],
 							this.unitIdentifier,
 							this.functionCode,
 							this.startingAddress[1],
@@ -172,175 +228,613 @@ namespace RTUModbusMasterExample
 							this.quantity[0],
                             this.crc[0],
                             this.crc[1]
-                            };
-              crc = BitConverter.GetBytes(calculateCRC(data, 6, 6));
+            };
 
-              data[12] = crc[0];
-              data[13] = crc[1];
-              serialPort.Write(data,6,8);
-
-            //  int bytes = serialPort.BytesToRead;
-           data = new byte[2100];
-              serialPort.Read(data, 0, data.Length);
-              response = new bool[quantity];
-              for (int i = 0; i < quantity; i++)
-              {
-                  int intData = data[3+i/8];
-                 int mask = Convert.ToInt32(Math.Pow(2, (i % 8)));
-                  response[i] = Convert.ToBoolean(intData & mask);
-              }    	
-        
-          
-            
-             
-           
+            crc = BitConverter.GetBytes(calculateCRC(data, 6, 6));
+            data[12] = crc[0];
+            data[13] = crc[1];
+            if (serialPort != null)
+            {
+                dataReceived = false;
+                if (quantity % 8 == 0)
+                    bytesToRead = 5 + quantity / 8;
+                else
+                    bytesToRead = 6 + quantity / 8;
                 
-                return (response);
-                
-            }
-
-      
-        public int[] ReadHoldingRegisters(int startAddress, int quantity)
-        {
-            int[] response;
-            this.functionCode = 0x03;
-            this.startingAddress = BitConverter.GetBytes(startAddress);
-            this.quantity = BitConverter.GetBytes(quantity);
-            this.SlaveId = 0x01;
-
-
-            byte[] data = new byte[] 
-                { 
-                this.SlaveId,
-
-                this.functionCode,
-                this.startingAddress[1],
-                this.startingAddress[0],
-                 this.quantity[1],
-
-                this.quantity[0],
-                 this.crc[0],
-                this.crc[1]
-           
-                 };
-            ushort length = (ushort)data.Length;
-            crc = BitConverter.GetBytes(calculateCRC(data, 0,6));
-            data[6] = this.crc[0];
-            data[7] = this.crc[1];
-            serialPort.Write(data, 0, data.Length);
-            try
-            {
-                data = new Byte[2100];
-                int NumberOfBytes = serialPort.Read(data, 0, data.Length);
-            }
-            catch (Exception E)
-            {
-                MessageBox.Show("" + E.Message);
-            }
-            response = new int[quantity];
-            for (int i = 0; i < quantity; i++)
-            {
-                byte lowByte;
-                byte highByte;
-                highByte = data[9 + i * 2];
-                lowByte = data[9 + i * 2 + 1];
-
-                data[9 + i * 2] = lowByte;
-                data[9 + i * 2 + 1] = highByte;
-
-                response[i] = BitConverter.ToInt16(data, (9 + i * 2));
-
-            }
-            return (response);
-        }
-
-
-        public int[] ReadinputRegisters(int startAddress, int quantity)
-        {
-            int[] response;
-            this.functionCode = 0x03;
-            this.startingAddress = BitConverter.GetBytes(startAddress);
-            this.quantity = BitConverter.GetBytes(quantity);
-            this.SlaveId = 0x01;
-
-
-            byte[] data = new byte[] 
-                { 
-                this.SlaveId,
-
-                this.functionCode,
-                this.startingAddress[1],
-                this.startingAddress[0],
-                 this.quantity[1],
-
-                this.quantity[0],
-                 this.crc[0],
-                this.crc[1]
-           
-                 };
-            ushort length = (ushort)data.Length;
-            crc = BitConverter.GetBytes(calculateCRC(data, 0,6));
-            data[6] = this.crc[0];
-            data[7] = this.crc[1];
-            serialPort.Write(data, 0, data.Length);
-            try
-            {
-                data = new Byte[2100];
-                int NumberOfBytes = serialPort.Read(data, 0, data.Length);
-            }
-            catch (Exception E)
-            {
-                MessageBox.Show("" + E.Message);
-            }
-            response = new int[quantity];
-            for (int i = 0; i < quantity; i++)
-            {
-                byte lowByte;
-                byte highByte;
-                highByte = data[9 + i * 2];
-                lowByte = data[9 + i * 2 + 1];
-
-                data[9 + i * 2] = lowByte;
-                data[9 + i * 2 + 1] = highByte;
-
-                response[i] = BitConverter.ToInt16(data, (9 + i * 2));
-
-            }
-            return (response);
-        }
-        public void writeSingleCoil(int startAddress)
-        {
-
-
-            bool value = true;
-
-            if (txtStartAddress1.Text == "")
-            {
-                MessageBox.Show("Please Enter Start Address");
-            }
-            else
-            {
-                try
+                serialPort.Write(data, 6, 8);
+                if (debug)
                 {
-                    byte[] coilValue = new byte[2];
-                    this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
-                    this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
-                    this.length = BitConverter.GetBytes((int)0x0006);
-                    this.functionCode = 0x05;
-                    this.startingAddress = BitConverter.GetBytes(startAddress);
-                    if (value == true)
+                    byte[] debugData = new byte[8];
+                    Array.Copy(data, 6, debugData, 0, 8);
+               
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[8];
+                    Array.Copy(data, 6, sendData, 0, 8);
+                    SendDataChanged(this);
+
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+                    receivedUnitIdentifier = data[6];
+                }
+                if (receivedUnitIdentifier != this.unitIdentifier)
+                    data = new byte[2100];
+                else
+                    countRetries = 0;
+            }
+         
+    
+            if (data[7] == 0x81 & data[8] == 0x01)
+            {
+            
+               MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x81 & data[8] == 0x02)
+            {
+               
+              MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x81 & data[8] == 0x03)
+            {
+             
+               MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x81 & data[8] == 0x04)
+            {
+
+              MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data[8] + 3), 6));
+                if ((crc[0] != data[data[8] + 9] | crc[1] != data[data[8] + 10]) & dataReceived)
+                {
+                    
+                    if (NumberOfRetries <= countRetries)
                     {
-                        coilValue = BitConverter.GetBytes((int)0xFF00);
+                        countRetries = 0;
+                        MessageBox.Show("Response CRC check failed");
                     }
                     else
                     {
-                        coilValue = BitConverter.GetBytes((int)0x0000);
+                        countRetries++;
+                        return ReadCoils(startingAddress, quantity);
                     }
-                    Byte[] data = new byte[]{	
-						
-							
-							
-							
+                }
+                else if (!dataReceived)
+                {
+                  
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        MessageBox.Show("No Response from Modbus Slave");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        return ReadCoils(startingAddress, quantity);
+                    }
+                }
+            }
+            response = new bool[quantity];
+            for (int i = 0; i < quantity; i++)
+            {
+                int intData = data[9 + i / 8];
+                int mask = Convert.ToInt32(Math.Pow(2, (i % 8)));
+                response[i] = Convert.ToBoolean((intData & mask) / mask);
+            }
+            return (response);
+        }
+
+
+
+
+        public bool[] ReadDiscreateInputs(int startingAddress, int quantity)
+        {
+
+            transctionIdentifierInternal++;
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+
+                    MessageBox.Show("serial port not opened");
+                }
+            if (serialPort == null)
+            {
+
+                MessageBox.Show("connection error");
+            }
+            if (startingAddress > 65535 | quantity > 2000)
+            {
+
+                MessageBox.Show("Starting address must be 0 - 65535; quantity must be 0 - 2000");
+            }
+            bool[] response;
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)0x0006);
+            this.functionCode = 0x02;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+            this.quantity = BitConverter.GetBytes(quantity);
+            Byte[] data = new byte[]{	
+                            this.transctionIdentifier[1],
+							this.transctionIdentifier[0],
+							this.protocolIdentifier[1],
+							this.protocolIdentifier[0],
+							this.length[1],
+							this.length[0],
+							this.unitIdentifier,
+							this.functionCode,
+							this.startingAddress[1],
+							this.startingAddress[0],
+							this.quantity[1],
+							this.quantity[0],
+                            this.crc[0],
+                            this.crc[1]
+            };
+
+            crc = BitConverter.GetBytes(calculateCRC(data, 6, 6));
+            data[12] = crc[0];
+            data[13] = crc[1];
+            if (serialPort != null)
+            {
+                dataReceived = false;
+                if (quantity % 8 == 0)
+                    bytesToRead = 5 + quantity / 8;
+                else
+                    bytesToRead = 6 + quantity / 8;
+
+                serialPort.Write(data, 6, 8);
+                if (debug)
+                {
+                    byte[] debugData = new byte[8];
+                    Array.Copy(data, 6, debugData, 0, 8);
+
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[8];
+                    Array.Copy(data, 6, sendData, 0, 8);
+                    SendDataChanged(this);
+
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+                    receivedUnitIdentifier = data[6];
+                }
+                if (receivedUnitIdentifier != this.unitIdentifier)
+                    data = new byte[2100];
+                else
+                    countRetries = 0;
+            }
+
+
+            if (data[7] == 0x82 & data[8] == 0x01)
+            {
+
+                MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x82 & data[8] == 0x02)
+            {
+
+                MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x82 & data[8] == 0x03)
+            {
+
+                MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x82 & data[8] == 0x04)
+            {
+
+                MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data[8] + 3), 6));
+                if ((crc[0] != data[data[8] + 9] | crc[1] != data[data[8] + 10]) & dataReceived)
+                {
+
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        MessageBox.Show("Response CRC check failed");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        return ReadDiscreateInputs(startingAddress, quantity);
+                    }
+                }
+                else if (!dataReceived)
+                {
+
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        MessageBox.Show("No Response from Modbus Slave");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        return ReadDiscreateInputs(startingAddress, quantity);
+                    }
+                }
+            }
+            response = new bool[quantity];
+            for (int i = 0; i < quantity; i++)
+            {
+                int intData = data[9 + i / 8];
+                int mask = Convert.ToInt32(Math.Pow(2, (i % 8)));
+                response[i] = Convert.ToBoolean((intData & mask) / mask);
+            }
+            return (response);
+        }
+
+
+        public int[] ReadHoldingRegisters(int startingAddress, int quantity)
+        {
+
+            transctionIdentifierInternal++;
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+
+                    MessageBox.Show("serial port not opened");
+                }
+            if (serialPort == null)
+            {
+
+                MessageBox.Show("connection error");
+            }
+            if (startingAddress > 65535 | quantity > 125)
+            {
+
+                throw new ArgumentException("Starting address must be 0 - 65535; quantity must be 0 - 125");
+            }
+            int[] response;
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)0x0006);
+            this.functionCode = 0x03;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+            this.quantity = BitConverter.GetBytes(quantity);
+            Byte[] data = new byte[]{	this.transctionIdentifier[1],
+							this.transctionIdentifier[0],
+							this.protocolIdentifier[1],
+							this.protocolIdentifier[0],
+							this.length[1],
+							this.length[0],
+							this.unitIdentifier,
+							this.functionCode,
+							this.startingAddress[1],
+							this.startingAddress[0],
+							this.quantity[1],
+							this.quantity[0],
+                            this.crc[0],
+                            this.crc[1]
+            };
+            crc = BitConverter.GetBytes(calculateCRC(data, 6, 6));
+            data[12] = crc[0];
+            data[13] = crc[1];
+            if (serialPort != null)
+            {
+                dataReceived = false;
+                bytesToRead = 5 + 2 * quantity;
+
+                serialPort.Write(data, 6, 8);
+                if (debug)
+                {
+                    byte[] debugData = new byte[8];
+                    Array.Copy(data, 6, debugData, 0, 8);
+
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[8];
+                    Array.Copy(data, 6, sendData, 0, 8);
+                    SendDataChanged(this);
+
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+
+                    receivedUnitIdentifier = data[6];
+                }
+                if (receivedUnitIdentifier != this.unitIdentifier)
+                    data = new byte[2100];
+                else
+                    countRetries = 0;
+            }
+
+            if (data[7] == 0x83 & data[8] == 0x01)
+            {
+
+                MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x83 & data[8] == 0x02)
+            {
+
+                MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x83 & data[8] == 0x03)
+            {
+
+                MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x83 & data[8] == 0x04)
+            {
+
+                MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data[8] + 3), 6));
+                if ((crc[0] != data[data[8] + 9] | crc[1] != data[data[8] + 10]) & dataReceived)
+                {
+
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        MessageBox.Show("Response CRC check failed");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        return ReadHoldingRegisters(startingAddress, quantity);
+                    }
+                }
+                else if (!dataReceived)
+                {
+
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        throw new TimeoutException("No Response from Modbus Slave");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        return ReadHoldingRegisters(startingAddress, quantity);
+                    }
+
+
+                }
+            }
+            response = new int[quantity];
+            for (int i = 0; i < quantity; i++)
+            {
+                byte lowByte;
+                byte highByte;
+                highByte = data[9 + i * 2];
+                lowByte = data[9 + i * 2 + 1];
+
+                data[9 + i * 2] = lowByte;
+                data[9 + i * 2 + 1] = highByte;
+
+                response[i] = BitConverter.ToInt16(data, (9 + i * 2));
+            }
+            return (response);
+        }
+
+        public int[] ReadInputRegisters(int startingAddress, int quantity)
+        {
+
+            transctionIdentifierInternal++;
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+
+                    MessageBox.Show("serial port not opened");
+                }
+            if (serialPort == null)
+            {
+
+                MessageBox.Show("connection error");
+            }
+            if (startingAddress > 65535 | quantity > 125)
+            {
+
+                throw new ArgumentException("Starting address must be 0 - 65535; quantity must be 0 - 125");
+            }
+            int[] response;
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)0x0006);
+            this.functionCode = 0x04;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+            this.quantity = BitConverter.GetBytes(quantity);
+            Byte[] data = new byte[]{	this.transctionIdentifier[1],
+							this.transctionIdentifier[0],
+							this.protocolIdentifier[1],
+							this.protocolIdentifier[0],
+							this.length[1],
+							this.length[0],
+							this.unitIdentifier,
+							this.functionCode,
+							this.startingAddress[1],
+							this.startingAddress[0],
+							this.quantity[1],
+							this.quantity[0],
+                            this.crc[0],
+                            this.crc[1]
+            };
+            crc = BitConverter.GetBytes(calculateCRC(data, 6,6));
+            data[12] = crc[0];
+            data[13] = crc[1];
+            if (serialPort != null)
+            {
+                dataReceived = false;
+                bytesToRead = 5 + 2 * quantity;
+
+                serialPort.Write(data, 6, 8);
+                if (debug)
+                {
+                    byte[] debugData = new byte[8];
+                    Array.Copy(data, 6, debugData, 0, 8);
+
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[8];
+                    Array.Copy(data, 6, sendData, 0, 8);
+                    SendDataChanged(this);
+
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+
+                    receivedUnitIdentifier = data[6];
+                }
+                if (receivedUnitIdentifier != this.unitIdentifier)
+                    data = new byte[2100];
+                else
+                    countRetries = 0;
+            }
+
+            if (data[7] == 0x84 & data[8] == 0x01)
+            {
+
+                MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x84 & data[8] == 0x02)
+            {
+
+                MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x84 & data[8] == 0x03)
+            {
+
+                MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x84 & data[8] == 0x04)
+            {
+
+                MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data[8] + 3),6));
+                if ((crc[0] != data[data[8] + 9] | crc[1] != data[data[8] + 10]) & dataReceived)
+                {
+
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        MessageBox.Show("Response CRC check failed");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        return ReadInputRegisters(startingAddress, quantity);
+                    }
+                }
+                else if (!dataReceived)
+                {
+
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        throw new TimeoutException("No Response from Modbus Slave");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        return ReadInputRegisters(startingAddress, quantity);
+                    }
+
+
+                }
+            }
+            response = new int[quantity];
+            for (int i = 0; i < quantity; i++)
+            {
+                byte lowByte;
+                byte highByte;
+                highByte = data[9 + i * 2];
+                lowByte = data[9 + i * 2 + 1];
+
+                data[9 + i * 2] = lowByte;
+                data[9 + i * 2 + 1] = highByte;
+
+                response[i] = BitConverter.ToInt16(data, (9 + i * 2));
+            }
+            return (response);
+        }
+        public void WriteSingleCoil(int startingAddress, bool value)
+        {
+
+
+            transctionIdentifierInternal++;
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+                 
+                 MessageBox.Show("serial port not opened");
+                }
+            if (serialPort == null)
+            {
+          
+               MessageBox.Show("connection error");
+            }
+            byte[] coilValue = new byte[2];
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)0x0006);
+            this.functionCode = 0x05;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+            if (value == true)
+            {
+                coilValue = BitConverter.GetBytes((int)0xFF00);
+            }
+            else
+            {
+                coilValue = BitConverter.GetBytes((int)0x0000);
+            }
+            Byte[] data = new byte[]{	this.transctionIdentifier[1],
+							this.transctionIdentifier[0],
+							this.protocolIdentifier[1],
+							this.protocolIdentifier[0],
+							this.length[1],
+							this.length[0],
 							this.unitIdentifier,
 							this.functionCode,
 							this.startingAddress[1],
@@ -350,43 +844,127 @@ namespace RTUModbusMasterExample
                             this.crc[0],
                             this.crc[1]    
                             };
-                    crc = BitConverter.GetBytes(calculateCRC(data, 6, 0));
-                    data[6] = crc[0];
-                    data[7] = crc[1];
-                    serialPort.Write(data, 0, 8);
-                    lstWriteDataToServer.Items.Clear();
-                }
-                catch (Exception e)
-                {
-                    MessageBox.Show("" + e.Message);
-                }
-            }
-
-
-        }
-
-        public void writeSingleRegister(int startAddress)
-        {
-            if (txtStartAddress1.Text == "")
+            crc = BitConverter.GetBytes(calculateCRC(data, 6, 6));
+            data[12] = crc[0];
+            data[13] = crc[1];
+            if (serialPort != null)
             {
-                MessageBox.Show("Please Enter Start Address Ans Size");
-            }
-            else
-            {
-                try
-                {
-
-
-                    byte[] registerValue = new byte[2];
-                    int value = Int16.Parse(lstWriteDataToServer.GetItemText(lstWriteDataToServer.Items[0]));
-                 
-                  
+                dataReceived = false;
+                bytesToRead = 8;
            
-                    this.functionCode = 0x06;
-                    this.startingAddress = BitConverter.GetBytes(startAddress);
-                    registerValue = BitConverter.GetBytes((int)value);
+                serialPort.Write(data, 6, 8);
+                if (debug)
+                {
+                    byte[] debugData = new byte[8];
+                    Array.Copy(data, 6, debugData, 0, 8);
+                  
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[8];
+                    Array.Copy(data, 6, sendData, 0, 8);
+                    SendDataChanged(this);
 
-                    Byte[] data = new byte[]{	
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+                    receivedUnitIdentifier = data[6];
+                    countRetries = 0;
+                }
+
+            
+            }
+            if (data[7] == 0x85 & data[8] == 0x01)
+            {
+               
+              MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x85 & data[8] == 0x02)
+            {
+                
+               MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x85 & data[8] == 0x03)
+            {
+                
+               MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x85 & data[8] == 0x04)
+            {
+               
+             MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, 6, 6));
+                if ((crc[0] != data[12] | crc[1] != data[13]) & dataReceived)
+                {
+                   
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                     MessageBox.Show("Response CRC check failed");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteSingleCoil(startingAddress, value);
+                    }
+                }
+                else if (!dataReceived)
+                {
+               
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        MessageBox.Show("No Response from Modbus Slave");
+
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteSingleCoil(startingAddress, value);
+                    }
+                }
+            }
+        }
+        public void WriteSingleRegister(int startingAddress, int value)
+        {
+          
+            transctionIdentifierInternal++;
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+                  
+        MessageBox.Show("serial port not opened");
+                }
+            if ( serialPort == null)
+            {
+              
+              MessageBox.Show("connection error");
+            }
+            byte[] registerValue = new byte[2];
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)0x0006);
+            this.functionCode = 0x06;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+            registerValue = BitConverter.GetBytes((int)value);
+
+            Byte[] data = new byte[]{	this.transctionIdentifier[1],
+							this.transctionIdentifier[0],
+							this.protocolIdentifier[1],
+							this.protocolIdentifier[0],
+							this.length[1],
+							this.length[0],
 							this.unitIdentifier,
 							this.functionCode,
 							this.startingAddress[1],
@@ -396,154 +974,403 @@ namespace RTUModbusMasterExample
                             this.crc[0],
                             this.crc[1]    
                             };
-                    crc = BitConverter.GetBytes(calculateCRC(data,6,0));
-                    data[6] = crc[0];
-                    data[7] = crc[1];
-                    serialPort.Write(data, 0, 8);
-                }
-
-                catch (Exception e)
+            crc = BitConverter.GetBytes(calculateCRC(data, 6,6));
+            data[12] = crc[0];
+            data[13] = crc[1];
+            if (serialPort != null)
+            {
+                dataReceived = false;
+                bytesToRead = 8;
+             
+                serialPort.Write(data, 6, 8);
+                if (debug)
                 {
-                    MessageBox.Show("" + e.Message);
+                    byte[] debugData = new byte[8];
+                    Array.Copy(data, 6, debugData, 0, 8);
+                  
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[8];
+                    Array.Copy(data, 6, sendData, 0, 8);
+                    SendDataChanged(this);
+
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+                    receivedUnitIdentifier = data[6];
+                }
+                if (receivedUnitIdentifier != this.unitIdentifier)
+                    data = new byte[2100];
+                else
+                    countRetries = 0;
+            }
+           
+            
+            if (data[7] == 0x86 & data[8] == 0x01)
+            {
+               
+               MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x86 & data[8] == 0x02)
+            {
+               
+            MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x86 & data[8] == 0x03)
+            {
+               
+               MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x86 & data[8] == 0x04)
+            {
+             
+               MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, 6,6));
+                if ((crc[0] != data[12] | crc[1] != data[13]) & dataReceived)
+                {
+                
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                    MessageBox.Show("Response CRC check failed");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteSingleRegister(startingAddress, value);
+                    }
+                }
+                else if (!dataReceived)
+                {
+                  
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        throw new TimeoutException("No Response from Modbus Slave");
+
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteSingleRegister(startingAddress, value);
+                    }
                 }
             }
         }
-        public void writeMultipleCoils(int startAddress)
+
+
+        public void WriteMultipleCoils(int startingAddress, bool[] values)
         {
-
-
-
-
-            if (txtStartAddress1.Text == "")
-            {
-                MessageBox.Show("Please Enter Start Address");
-            }
-            else
-            {
-                try
-                {
-
-                    bool[] values;
-                    int m = lstWriteDataToServer.Items.Count;
-                    values = new bool[m];
-                    for (int i = 0; i < m; i++)
-                    {
-                        values[i] = Convert.ToBoolean(lstWriteDataToServer.Items[i]);
-                    }
-
-                    byte byteCount = (byte)((values.Length % 8 != 0 ? values.Length / 8 + 1 : (values.Length / 8)));
-                    byte[] quantityOfOutputs = BitConverter.GetBytes((int)values.Length);
-                    byte singleCoilValue = 0;
-
-
-
-                    this.functionCode = 0x0F;
-                    this.startingAddress = BitConverter.GetBytes(startAddress);
-
-
-
-                    Byte[] data = new byte[8 + 2 + (values.Length % 8 != 0 ? values.Length / 8 : (values.Length / 8) - 1)];
-
-                    data[0] = this.unitIdentifier;
-                    data[1] = this.functionCode;
-                    data[2] = this.startingAddress[1];
-                    data[3] = this.startingAddress[0];
-                    data[4] = quantityOfOutputs[1];
-                    data[5] = quantityOfOutputs[0];
-                    data[6] = byteCount;
-                    for (int i = 0; i < values.Length; i++)
-                    {
-                        if ((i % 8) == 0)
-                            singleCoilValue = 0;
-                        byte CoilValue;
-                        if (values[i] == true)
-                            CoilValue = 1;
-                        else
-                            CoilValue = 0;
-
-
-                        singleCoilValue = (byte)((int)CoilValue << (i % 8) | (int)singleCoilValue);
-
-                        data[7 + (i / 8)] = singleCoilValue;
-                    }
-                    crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data.Length - 2), 0));
-                    data[data.Length - 2] = crc[0];
-                    data[data.Length - 1] = crc[1];
-                    serialPort.Write(data, 0, data.Length);
-                    lstWriteDataToServer.Items.Clear();
-                }
-                catch (Exception e)
-                {
-                    MessageBox.Show("" + e.Message);
-                }
-            }
-
-        }
-
-        public void writeMultipleRegisters(int startAddress)
-        {
-            if (txtStartAddress1.Text == "")
-            {
-                MessageBox.Show("Please Enter Start Adress");
-            }
-            else
-            {
-                try
-                {
-
-
-                    int valuesLength = lstWriteDataToServer.Items.Count;
-                    int[] values = new int[valuesLength];
-                    for (int i = 0; i < valuesLength; i++)
-                    {
-                        values[i] = Int16.Parse(lstWriteDataToServer.GetItemText(lstWriteDataToServer.Items[i]));
-                    }
-                    byte byteCount = (byte)(values.Length * 2);
-                    byte[] quantityOfOutputs = BitConverter.GetBytes((int)values.Length);
-                    this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
-                    this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
-
-                    this.functionCode = 0x10;
-                    this.startingAddress = BitConverter.GetBytes(startAddress);
-
-                    Byte[] data = new byte[7 + 2 + values.Length * 2];
-
-                    data[0] = this.unitIdentifier;
-                    data[1] = this.functionCode;
-                    data[2] = this.startingAddress[1];
-                    data[3] = this.startingAddress[0];
-                    data[4] = quantityOfOutputs[1];
-                    data[5] = quantityOfOutputs[0];
-                    data[6] = byteCount;
-                    for (int i = 0; i < values.Length; i++)
-                    {
-                        byte[] singleRegisterValue = BitConverter.GetBytes((int)values[i]);
-                        data[7 + i * 2] = singleRegisterValue[1];
-                        data[8 + i * 2] = singleRegisterValue[0];
-                    }
-                    crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data.Length - 2), 0));
-                    data[data.Length - 2] = crc[0];
-                    data[data.Length - 1] = crc[1];
-
-                    serialPort.Write(data, 0, data.Length);
-                }
-                catch (Exception e)
-                {
-                    MessageBox.Show("" + e.Message);
-
-                }
-            }
-        }
         
-    
+           
+            transctionIdentifierInternal++;
+            byte byteCount = (byte)((values.Length % 8 != 0 ? values.Length / 8 + 1 : (values.Length / 8)));
+            byte[] quantityOfOutputs = BitConverter.GetBytes((int)values.Length);
+            byte singleCoilValue = 0;
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+                 
+                   MessageBox.Show("serial port not opened");
+                }
+            if ( serialPort == null)
+            {
+               
+                MessageBox.Show("connection error");
+            }
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)(7 + (byteCount)));
+            this.functionCode = 0x0F;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+
+
+
+            Byte[] data = new byte[14 + 2 + (values.Length % 8 != 0 ? values.Length / 8 : (values.Length / 8) - 1)];
+            data[0] = this.transctionIdentifier[1];
+            data[1] = this.transctionIdentifier[0];
+            data[2] = this.protocolIdentifier[1];
+            data[3] = this.protocolIdentifier[0];
+            data[4] = this.length[1];
+            data[5] = this.length[0];
+            data[6] = this.unitIdentifier;
+            data[7] = this.functionCode;
+            data[8] = this.startingAddress[1];
+            data[9] = this.startingAddress[0];
+            data[10] = quantityOfOutputs[1];
+            data[11] = quantityOfOutputs[0];
+            data[12] = byteCount;
+            for (int i = 0; i < values.Length; i++)
+            {
+                if ((i % 8) == 0)
+                    singleCoilValue = 0;
+                byte CoilValue;
+                if (values[i] == true)
+                    CoilValue = 1;
+                else
+                    CoilValue = 0;
+
+
+                singleCoilValue = (byte)((int)CoilValue << (i % 8) | (int)singleCoilValue);
+
+                data[13 + (i / 8)] = singleCoilValue;
+            }
+            crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data.Length - 8),6));
+            data[data.Length - 2] = crc[0];
+            data[data.Length - 1] = crc[1];
+            if (serialPort != null)
+            {
+                dataReceived = false;
+                bytesToRead = 8;
+                //               serialport.ReceivedBytesThreshold = bytesToRead;
+                serialPort.Write(data, 6, data.Length - 6);
+                if (debug)
+                {
+                    byte[] debugData = new byte[data.Length - 6];
+                    Array.Copy(data, 6, debugData, 0, data.Length - 6);
+              
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[data.Length - 6];
+                    Array.Copy(data, 6, sendData, 0, data.Length - 6);
+                    SendDataChanged(this);
+
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+                    receivedUnitIdentifier = data[6];
+                }
+                if (receivedUnitIdentifier != this.unitIdentifier)
+                    data = new byte[2100];
+                else
+                    countRetries = 0;
+            }
+            
+            if (data[7] == 0x8F & data[8] == 0x01)
+            {
+              
+               MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x8F & data[8] == 0x02)
+            {
+              
+               MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x8F & data[8] == 0x03)
+            {
+            
+               MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x8F & data[8] == 0x04)
+            {
+               
+                MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, 6,6));
+                if ((crc[0] != data[12] | crc[1] != data[13]) & dataReceived)
+                {
+                 
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                       MessageBox.Show("Response CRC check failed");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteMultipleCoils(startingAddress, values);
+                    }
+                }
+                else if (!dataReceived)
+                {
+                 
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        throw new TimeoutException("No Response from Modbus Slave");
+
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteMultipleCoils(startingAddress, values);
+                    }
+                }
+            }
+        }
+
+        public void WriteMultipleRegisters(int startingAddress, int[] values)
+        {
+            string debugString = "";
+            for (int i = 0; i < values.Length; i++)
+                debugString = debugString + values[i] + " ";
+          
+            transctionIdentifierInternal++;
+            byte byteCount = (byte)(values.Length * 2);
+            byte[] quantityOfOutputs = BitConverter.GetBytes((int)values.Length);
+            if (serialPort != null)
+                if (!serialPort.IsOpen)
+                {
+
+               MessageBox.Show("serial port not opened");
+                }
+            if ( serialPort == null)
+            {
+                
+               MessageBox.Show("connection error");
+            }
+            this.transctionIdentifier = BitConverter.GetBytes((uint)transctionIdentifierInternal);
+            this.protocolIdentifier = BitConverter.GetBytes((int)0x0000);
+            this.length = BitConverter.GetBytes((int)(7 + values.Length * 2));
+            this.functionCode = 0x10;
+            this.startingAddress = BitConverter.GetBytes(startingAddress);
+
+            Byte[] data = new byte[13 + 2 + values.Length * 2];
+            data[0] = this.transctionIdentifier[1];
+            data[1] = this.transctionIdentifier[0];
+            data[2] = this.protocolIdentifier[1];
+            data[3] = this.protocolIdentifier[0];
+            data[4] = this.length[1];
+            data[5] = this.length[0];
+            data[6] = this.unitIdentifier;
+            data[7] = this.functionCode;
+            data[8] = this.startingAddress[1];
+            data[9] = this.startingAddress[0];
+            data[10] = quantityOfOutputs[1];
+            data[11] = quantityOfOutputs[0];
+            data[12] = byteCount;
+            for (int i = 0; i < values.Length; i++)
+            {
+                byte[] singleRegisterValue = BitConverter.GetBytes((int)values[i]);
+                data[13 + i * 2] = singleRegisterValue[1];
+                data[14 + i * 2] = singleRegisterValue[0];
+            }
+            crc = BitConverter.GetBytes(calculateCRC(data, (ushort)(data.Length - 8),6));
+            data[data.Length - 2] = crc[0];
+            data[data.Length - 1] = crc[1];
+            if (serialPort != null)
+            {
+                dataReceived = false;
+                bytesToRead = 8;
+           
+                serialPort.Write(data, 6, data.Length - 6);
+
+                if (debug)
+                {
+                    byte[] debugData = new byte[data.Length - 6];
+                    Array.Copy(data, 6, debugData, 0, data.Length - 6);
+                   
+                }
+                if (SendDataChanged != null)
+                {
+                    sendData = new byte[data.Length - 6];
+                    Array.Copy(data, 6, sendData, 0, data.Length - 6);
+                    SendDataChanged(this);
+
+                }
+                data = new byte[2100];
+                readBuffer = new byte[256];
+                DateTime dateTimeSend = DateTime.Now;
+                byte receivedUnitIdentifier = 0xFF;
+                while (receivedUnitIdentifier != this.unitIdentifier & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                {
+                    while (dataReceived == false & !((DateTime.Now.Ticks - dateTimeSend.Ticks) > TimeSpan.TicksPerMillisecond * this.connectTimeout))
+                        System.Threading.Thread.Sleep(1);
+                    data = new byte[2100];
+                    Array.Copy(readBuffer, 0, data, 6, readBuffer.Length);
+                    receivedUnitIdentifier = data[6];
+                }
+                if (receivedUnitIdentifier != this.unitIdentifier)
+                    data = new byte[2100];
+                else
+                    countRetries = 0;
+            }
+          
+            if (data[7] == 0x90 & data[8] == 0x01)
+            {
+             
+                MessageBox.Show("Function code not supported by master");
+            }
+            if (data[7] == 0x90 & data[8] == 0x02)
+            {
+               
+              MessageBox.Show("Starting address invalid or starting address + quantity invalid");
+            }
+            if (data[7] == 0x90 & data[8] == 0x03)
+            {
+             MessageBox.Show("quantity invalid");
+            }
+            if (data[7] == 0x90 & data[8] == 0x04)
+            {
+             
+              MessageBox.Show("error reading");
+            }
+            if (serialPort != null)
+            {
+                crc = BitConverter.GetBytes(calculateCRC(data, 6,6));
+                if ((crc[0] != data[12] | crc[1] != data[13]) & dataReceived)
+                {
+               
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                       MessageBox.Show("Response CRC check failed");
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteMultipleRegisters(startingAddress, values);
+                    }
+                }
+                else if (!dataReceived)
+                {
+                
+                    if (NumberOfRetries <= countRetries)
+                    {
+                        countRetries = 0;
+                        throw new TimeoutException("No Response from Modbus Slave");
+
+                    }
+                    else
+                    {
+                        countRetries++;
+                        WriteMultipleRegisters(startingAddress, values);
+                    }
+                }
+            }
+        }
+
         private void btnReadDiscreateInputs_Click(object sender, EventArgs e)
         {
             lstReadDataFromServer.Items.Clear();
         
             try
             {
-              bool[] response=   ReadDiscreateInputs(Int32.Parse(txtStartAddress.Text)-1,Int32.Parse(txtSize.Text));
-                for(int i=0;i<response.Length;i++)
+             bool[] response=   ReadDiscreateInputs(Int32.Parse(txtStartAddress.Text)-1,Int32.Parse(txtSize.Text));
+             for(int i=0;i<response.Length;i++)
                 {
                     lstReadDataFromServer.Items.Add(response[i]);
                 }
@@ -557,24 +1384,7 @@ namespace RTUModbusMasterExample
         
             
         }
-        private void Form1_Closing(object sender, EventArgs e)
-        {
-            if(connected)
-            {
-                serialPort.Close();
-            }
-        }
-        void serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
-        {
-            int dataLength = serialPort.BytesToRead;
-            byte[] data = new byte[dataLength];
-            int nbrDataRead = serialPort.Read(data, 0, dataLength);
-            if (nbrDataRead == 0)
-                return;
 
-            if (NewSerialDataRecieved != null)
-                NewSerialDataRecieved(this, new SerialDataEventArgs(data));
-        }
         private void btnConnect_Click(object sender, EventArgs e)
         {
             try
@@ -608,15 +1418,26 @@ namespace RTUModbusMasterExample
                     {
                         stopBits = StopBits.Two;
                     }
-                    serialPort = new SerialPort(portName, baudRate, parity, 8, stopBits);
-                    serialPort.DataReceived += new SerialDataReceivedEventHandler(serialPort_DataReceived);
-
-                    serialPort.Open();
-                    connected = true;
-                    if(serialPort.IsOpen==true)
+                    try
                     {
-                    MessageBox.Show("COM-Port Connected");
+                        serialPort = new SerialPort(portName, baudRate, parity, 8, stopBits);
+serialPort.WriteTimeout = 10000;
+            serialPort.ReadTimeout = connectTimeout;
+           
+            serialPort.DataReceived += new SerialDataReceivedEventHandler(DataReceivedHandler);     
+                        serialPort.Open();
+
+                        connected = true;
+                        if (serialPort.IsOpen == true)
+                        {
+                            MessageBox.Show("COM-Port Connected");
+                        }
                     }
+                    catch(Exception se)
+                    {
+                        MessageBox.Show(""+se.Message);
+                    }
+                
                 }
                 if (connected)
                 {
@@ -663,9 +1484,108 @@ namespace RTUModbusMasterExample
 
         }
 
+        private void DataReceivedHandler(object sender,
+                        SerialDataReceivedEventArgs e)
+        {
+            serialPort.DataReceived -= DataReceivedHandler;
+
+           
+        	receiveActive = true;
+        	
+        	const long ticksWait = TimeSpan.TicksPerMillisecond * 2000;
+        	
+        	
+        	SerialPort sp = (SerialPort)sender;
+            if (bytesToRead == 0)
+            {
+                sp.DiscardInBuffer();
+                receiveActive = false;
+                serialPort.DataReceived += new SerialDataReceivedEventHandler(DataReceivedHandler);
+                return;
+            }
+            readBuffer = new byte[256];
+        	int numbytes=0;
+            int actualPositionToRead = 0;
+            DateTime dateTimeLastRead = DateTime.Now;
+            do{
+            	try {
+            		dateTimeLastRead = DateTime.Now;  
+            		while ((sp.BytesToRead) == 0) 
+            		{
+            			System.Threading.Thread.Sleep(10);
+            			if  ((DateTime.Now.Ticks - dateTimeLastRead.Ticks) > ticksWait) 
+            				break;
+            		}
+            		numbytes=sp.BytesToRead;
+            		
+            	
+            	byte[] rxbytearray = new byte[numbytes];
+            	sp.Read(rxbytearray, 0, numbytes);
+                Array.Copy(rxbytearray,0, readBuffer,actualPositionToRead, (actualPositionToRead + rxbytearray.Length) <= bytesToRead ? rxbytearray.Length : bytesToRead - actualPositionToRead); 
+            	
+            	actualPositionToRead = actualPositionToRead + rxbytearray.Length;
+            	
+            	}
+            	catch (Exception){
+            	
+            	}
+
+                if (bytesToRead <= actualPositionToRead)
+                    break;
+
+            	if (DetectValidModbusFrame(readBuffer, (actualPositionToRead < readBuffer.Length) ? actualPositionToRead : readBuffer.Length) | bytesToRead <= actualPositionToRead)
+                    break;
+            }
+            while ((DateTime.Now.Ticks - dateTimeLastRead.Ticks) < ticksWait) ;
+            
+        
+
+            receiveData = new byte[actualPositionToRead];
+            Array.Copy(readBuffer, 0, receiveData, 0, (actualPositionToRead < readBuffer.Length) ? actualPositionToRead: readBuffer.Length);
+        
+            bytesToRead = 0;
 
 
+         
+            
+            dataReceived = true;
+            receiveActive = false;
+            serialPort.DataReceived += new SerialDataReceivedEventHandler(DataReceivedHandler);
+            if (ReceiveDataChanged != null)
+            {
 
+                ReceiveDataChanged(this);
+
+            }
+            
+            
+        }
+        public  bool DetectValidModbusFrame(byte[] readBuffer, int length)
+        {
+        	
+        	if (length < 6)
+        		return false;
+        	
+        	if ((readBuffer[0] < 1) | (readBuffer[0] > 247))
+        		return false;
+    
+            byte[] crc = new byte[2];
+            crc = BitConverter.GetBytes(calculateCRC(readBuffer,(ushort)(length-2),6));
+                if (crc[0] != readBuffer[length-2] | crc[1] != readBuffer[length-1])
+                	return false;
+            return true;
+        }
+         public int ConnectionTimeout
+        {
+            get
+            {
+                return connectTimeout;
+            }
+            set
+            {
+                connectTimeout = value;
+            }
+        }
         public void disConnect()
         {
             if (connected)
@@ -679,19 +1599,20 @@ namespace RTUModbusMasterExample
      
       private void btnReadCoils_Click(object sender, EventArgs e)
       {
+          lstReadDataFromServer.Items.Clear();
 
           try
           {
-            //  bool[] response=ReadCoils(Int32.Parse(txtStartAddress.Text) - 1, Int32.Parse(txtSize.Text));
-
-             // for (int i = 0; i < response.Length; i++)
-            //  {
-                //  lstReadDataFromServer.Items.Add(response[i]);
-             // }
+             bool[] response = ReadCoils(Int32.Parse(txtStartAddress.Text) - 1, Int32.Parse(txtSize.Text));
+             for (int i = 0; i < response.Length; i++)
+              {
+                  lstReadDataFromServer.Items.Add(response[i]);
+              }
+              
           }
-          catch(Exception ee)
+          catch (IOException ioe)
           {
-              MessageBox.Show(""+ee.Message);
+              MessageBox.Show("" + ioe.Message);
           }
        
         
@@ -736,7 +1657,7 @@ namespace RTUModbusMasterExample
 
           }
       }
-
+       
       private void btnReadHoldingRegisters_Click(object sender, EventArgs e)
       {
           if(txtSize.Text==""||txtStartAddress.Text=="")
@@ -747,6 +1668,7 @@ namespace RTUModbusMasterExample
           {
           try
           {
+              lstReadDataFromServer.Items.Clear();
               int[] response = ReadHoldingRegisters(Int32.Parse(txtStartAddress.Text)-1, Int32.Parse(txtSize.Text));
 
               for (int i = 0; i < response.Length; i++)
@@ -771,7 +1693,8 @@ namespace RTUModbusMasterExample
 
               try
               {
-                  int[] response = ReadinputRegisters(Int32.Parse(txtStartAddress.Text) - 1, Int32.Parse(txtSize.Text));
+                  lstReadDataFromServer.Items.Clear();
+                  int[] response = ReadInputRegisters(Int32.Parse(txtStartAddress.Text) - 1, Int32.Parse(txtSize.Text));
 
                   for (int i = 0; i < response.Length; i++)
                   {
@@ -789,6 +1712,11 @@ namespace RTUModbusMasterExample
 
       private void btnWriteSingleCoil_Click(object sender, EventArgs e)
       {
+          bool values;
+          String val;
+          val = lstWriteDataToServer.Items[0].ToString();
+          values = Convert.ToBoolean(val);
+          
           if (txtStartAddress1.Text == "")
           {
               MessageBox.Show("Enter Start Address");
@@ -798,8 +1726,8 @@ namespace RTUModbusMasterExample
               MessageBox.Show("Add data to Write");
           }
           else    {
-              writeSingleCoil(Int32.Parse(txtStartAddress1.Text)-1);
-
+              WriteSingleCoil(Int32.Parse(txtStartAddress1.Text)-1,values);
+              lstWriteDataToServer.Items.Clear();
           }
         
 
@@ -846,9 +1774,12 @@ namespace RTUModbusMasterExample
 
       private void btnWriteSingleRegister_Click(object sender, EventArgs e)
       {
+          int value;
+          String val;
+          val = lstWriteDataToServer.Items[0].ToString();
+          value = Int32.Parse(val);
          
-         
-              writeSingleRegister(Int32.Parse(txtStartAddress1.Text)-1);
+              WriteSingleRegister(Int32.Parse(txtStartAddress1.Text)-1,value);
 
         
         
@@ -856,7 +1787,14 @@ namespace RTUModbusMasterExample
 
       private void btnWriteMultipleCoils_Click(object sender, EventArgs e)
       {
-
+          int count=lstWriteDataToServer.Items.Count;
+          bool[] values=new bool[count];
+          String val;
+          for (int i = 0; i <count ;i++ )
+          {
+              val = lstWriteDataToServer.Items[i].ToString();
+              values[i] = Convert.ToBoolean(val);
+          }
           if (txtStartAddress1.Text == "")
           {
               MessageBox.Show("Enter Start Address");
@@ -866,14 +1804,24 @@ namespace RTUModbusMasterExample
               MessageBox.Show("Add data to Write");
           }
           else  {
-              writeMultipleCoils(Int32.Parse(txtStartAddress1.Text)-1);
-              
+              WriteMultipleCoils(Int32.Parse(txtStartAddress1.Text)-1,values);
+              lstWriteDataToServer.Items.Clear();
           }
         
       }
-
       private void btnWriteMultipleRegisters_Click(object sender, EventArgs e)
       {
+
+          int count = lstWriteDataToServer.Items.Count;
+          int[] values = new int[count];
+          String val;
+          for (int i = 0; i < count;i++ )
+          {
+              val = lstWriteDataToServer.Items[i].ToString();
+              values[i] = Int32.Parse(val);
+
+          }
+
           if (txtStartAddress1.Text == "")
           {
               MessageBox.Show("Enter Start Address");
@@ -883,7 +1831,7 @@ namespace RTUModbusMasterExample
               MessageBox.Show("Add data to Write");
           }
           else {
-              writeMultipleRegisters(Int32.Parse(txtStartAddress1.Text)-1);
+              WriteMultipleRegisters(Int32.Parse(txtStartAddress1.Text)-1,values);
               lstWriteDataToServer.Items.Clear();
           }
       }
@@ -892,17 +1840,11 @@ namespace RTUModbusMasterExample
       {
 
       }
+      
+
     
          
     }
-    public class SerialDataEventArgs : EventArgs
-    {
-        public byte[] Data;
-        public SerialDataEventArgs(byte[] dataInByteArray)
-        {
-            Data = dataInByteArray;
-        }
-
-    }
+   
 
 }

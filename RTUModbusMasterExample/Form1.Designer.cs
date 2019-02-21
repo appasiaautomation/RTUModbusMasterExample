@@ -375,7 +375,7 @@
             // 
             // btnClearEntry
             // 
-            this.btnClearEntry.Location = new System.Drawing.Point(606, 200);
+            this.btnClearEntry.Location = new System.Drawing.Point(581, 233);
             this.btnClearEntry.Name = "btnClearEntry";
             this.btnClearEntry.Size = new System.Drawing.Size(75, 41);
             this.btnClearEntry.TabIndex = 32;
@@ -385,7 +385,7 @@
             // 
             // btnClearAll
             // 
-            this.btnClearAll.Location = new System.Drawing.Point(745, 199);
+            this.btnClearAll.Location = new System.Drawing.Point(709, 232);
             this.btnClearAll.Name = "btnClearAll";
             this.btnClearAll.Size = new System.Drawing.Size(75, 42);
             this.btnClearAll.TabIndex = 33;
@@ -395,7 +395,7 @@
             // 
             // btnPrepareCoils
             // 
-            this.btnPrepareCoils.Location = new System.Drawing.Point(606, 312);
+            this.btnPrepareCoils.Location = new System.Drawing.Point(581, 327);
             this.btnPrepareCoils.Name = "btnPrepareCoils";
             this.btnPrepareCoils.Size = new System.Drawing.Size(112, 23);
             this.btnPrepareCoils.TabIndex = 34;
@@ -405,7 +405,7 @@
             // 
             // btnPrepareRegisters
             // 
-            this.btnPrepareRegisters.Location = new System.Drawing.Point(757, 312);
+            this.btnPrepareRegisters.Location = new System.Drawing.Point(709, 327);
             this.btnPrepareRegisters.Name = "btnPrepareRegisters";
             this.btnPrepareRegisters.Size = new System.Drawing.Size(105, 23);
             this.btnPrepareRegisters.TabIndex = 35;
@@ -415,23 +415,23 @@
             // 
             // txtPrepareCoils
             // 
-            this.txtPrepareCoils.Location = new System.Drawing.Point(606, 271);
+            this.txtPrepareCoils.Location = new System.Drawing.Point(581, 287);
             this.txtPrepareCoils.Name = "txtPrepareCoils";
             this.txtPrepareCoils.Size = new System.Drawing.Size(100, 20);
             this.txtPrepareCoils.TabIndex = 36;
             // 
             // txtPrepareRegisters
             // 
-            this.txtPrepareRegisters.Location = new System.Drawing.Point(757, 269);
+            this.txtPrepareRegisters.Location = new System.Drawing.Point(709, 287);
             this.txtPrepareRegisters.Name = "txtPrepareRegisters";
             this.txtPrepareRegisters.Size = new System.Drawing.Size(100, 20);
             this.txtPrepareRegisters.TabIndex = 37;
             // 
             // richTextBox2
             // 
-            this.richTextBox2.Location = new System.Drawing.Point(634, 76);
+            this.richTextBox2.Location = new System.Drawing.Point(593, 101);
             this.richTextBox2.Name = "richTextBox2";
-            this.richTextBox2.Size = new System.Drawing.Size(198, 96);
+            this.richTextBox2.Size = new System.Drawing.Size(191, 96);
             this.richTextBox2.TabIndex = 38;
             this.richTextBox2.Text = "";
             // 
